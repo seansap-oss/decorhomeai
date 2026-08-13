@@ -130,13 +130,24 @@ export async function POST(req: NextRequest) {
         throw new Error("Unexpected response structure from Replicate model output.");
       }
     } catch (replicateErr: any) {
-      console.warn("Replicate API execution notice:", replicateErr.message);
+      console.error("Replicate API execution failure:", replicateErr.message);
 
-      // If token is invalid or Replicate returned an error, fallback to curated style render
-      const matchingStyle = DESIGN_STYLES.find(
-        (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
-      );
-      generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
+      // If token is missing, provide a demo preview with notice
+      if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_your_")) {
+        const matchingStyle = DESIGN_STYLES.find(
+          (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
+        );
+        generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
+      } else {
+        // Real token is configured but Replicate rejected the call (e.g. 402 Insufficient Credit or 401 Unauthorized)
+        let customMessage = replicateErr.message;
+        if (replicateErr.message?.includes("402") || replicateErr.message?.includes("Insufficient credit") || replicateErr.message?.includes("purchase credit")) {
+          customMessage = "Replicate Account Insufficient Credit ($0 balance): To run real AI image-to-image transformations on your uploaded photos, please add a small credit ($5) at https://replicate.com/account/billing";
+        } else if (replicateErr.message?.includes("401") || replicateErr.message?.includes("Unauthenticated")) {
+          customMessage = "Invalid Replicate API Token: Please check your token at https://replicate.com/account/api-tokens";
+        }
+        throw new Error(customMessage);
+      }
     }
 
     // 6. Download the generated image from temporary Replicate URL and save permanently into Supabase Storage
