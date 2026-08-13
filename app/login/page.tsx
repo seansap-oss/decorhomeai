@@ -69,7 +69,7 @@ function AuthForm() {
           router.push("/dashboard");
         } else {
           setSuccessMessage(
-            "Account created successfully! Please check your email inbox to confirm your account."
+            "Account created successfully! If email confirmation is enabled on your Supabase project, please check your inbox to confirm, or try signing in."
           );
         }
       } else {
@@ -83,7 +83,11 @@ function AuthForm() {
       }
     } catch (err: any) {
       console.error("Auth error:", err);
-      setErrorMessage(err.message || "Failed to authenticate. Please check your credentials.");
+      if (err.message?.includes("Invalid login credentials")) {
+        setErrorMessage("Account not found or password incorrect. If you haven't created an account yet, click the 'Sign Up (Free 5 Credits)' tab above to register first!");
+      } else {
+        setErrorMessage(err.message || "Failed to authenticate. Please check your credentials.");
+      }
     } finally {
       setIsLoading(false);
     }
