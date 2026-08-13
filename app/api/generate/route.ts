@@ -41,6 +41,7 @@ export async function POST(req: NextRequest) {
 
   let creditDeducted = false;
   let remainingCredits = 5;
+  let originalCredits = 5;
   let userId = user?.id || "guest";
 
   // 3. If user is authenticated, verify and deduct real credits in Supabase
@@ -52,6 +53,7 @@ export async function POST(req: NextRequest) {
       .single();
 
     if (userRecord) {
+      originalCredits = userRecord.credits;
       if (userRecord.credits <= 0) {
         return NextResponse.json(
           {
@@ -228,12 +230,12 @@ export async function POST(req: NextRequest) {
     console.error("Critical error during AI generation pipeline:", error);
 
     // 9. Catch block: Securely refund the user's deducted credit
-    if (creditDeducted) {
+    if (creditDeducted && user) {
       try {
         await adminSupabase
           .from("users")
           .update({
-            credits: userRecord.credits,
+            credits: originalCredits,
             updated_at: new Date().toISOString(),
           })
           .eq("id", user.id);
