@@ -90,67 +90,67 @@ export async function POST(req: NextRequest) {
     const negativePrompt =
       "ugly, deformed, noisy, blurry, watermark, cartoon, sketch, low quality, distortion, bad proportions, cluttered junk, oversaturated, unrealistic lighting, duplicate furniture, artifacts";
 
-    // 5. Call Replicate API with rocketdigitalai/interior-design-sdxl-lightning
+    let generatedRemoteUrl: string = "";
+    let aiEngineUsed = "Free Open-Source FLUX AI Engine";
+
+    // 5. Attempt Replicate ControlNet if valid token is provided
     const replicateToken = process.env.REPLICATE_API_TOKEN;
-    if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_your_")) {
-      // In development or when API token is not yet configured with real credit,
-      // fallback gracefully to a high-resolution simulation with realistic timeout
-      console.warn("REPLICATE_API_TOKEN is placeholder or not set. Simulating generation.");
+    const isReplicateConfigured =
+      replicateToken &&
+      !replicateToken.includes("placeholder") &&
+      !replicateToken.startsWith("r8_your_");
+
+    if (isReplicateConfigured) {
+      try {
+        const replicate = new Replicate({
+          auth: replicateToken,
+        });
+
+        // Run the official adirik/interior-design ControlNet image-to-image pipeline
+        const output: any = await replicate.run(
+          "adirik/interior-design:76604baddc85b1b4616e1c6475eca080da339c8875bd4996705440484a6eac38",
+          {
+            input: {
+              image: imageUrl,
+              prompt: positivePrompt,
+              negative_prompt: negativePrompt,
+              prompt_strength: 0.75,
+              guidance_scale: 15,
+              num_inference_steps: 30,
+            },
+          }
+        );
+
+        if (Array.isArray(output) && output.length > 0) {
+          generatedRemoteUrl = String(output[0]);
+          aiEngineUsed = "Replicate ControlNet SDXL";
+        } else if (typeof output === "string") {
+          generatedRemoteUrl = output;
+          aiEngineUsed = "Replicate ControlNet SDXL";
+        } else if (output && typeof output === "object" && output.url) {
+          generatedRemoteUrl = String(output.url());
+          aiEngineUsed = "Replicate ControlNet SDXL";
+        }
+      } catch (replicateErr: any) {
+        console.warn(
+          "Replicate GPU failed (insufficient credit or rate limit), falling back to 100% Free FLUX AI Engine:",
+          replicateErr.message
+        );
+      }
     }
 
-    const replicate = new Replicate({
-      auth: replicateToken || "fallback_token",
-    });
-
-    let generatedRemoteUrl: string = "";
-
-    try {
-      // Run the official adirik/interior-design ControlNet image-to-image pipeline
-      const output: any = await replicate.run(
-        "adirik/interior-design:76604baddc85b1b4616e1c6475eca080da339c8875bd4996705440484a6eac38",
-        {
-          input: {
-            image: imageUrl,
-            prompt: positivePrompt,
-            negative_prompt: negativePrompt,
-            prompt_strength: 0.75, // Keeps 75% creative redesign while locking original room walls & furniture geometry
-            guidance_scale: 15,
-            num_inference_steps: 30,
-          },
-        }
+    // 6. Free Tier: If Replicate is not funded or unconfigured, generate with 100% Free FLUX AI Engine ($0 cost, no API key required)
+    if (!generatedRemoteUrl) {
+      const seed = Math.floor(Math.random() * 10000000);
+      const encodedPrompt = encodeURIComponent(
+        `Professional architectural interior photography, ${designStyle} style ${roomType}, ${customPrompt || "luxurious interior design"}, 8k uhd, architectural digest magazine photograph, raytraced lighting, ultra-detailed interior finishes, mastercraft furniture`
       );
 
-      if (Array.isArray(output) && output.length > 0) {
-        generatedRemoteUrl = String(output[0]);
-      } else if (typeof output === "string") {
-        generatedRemoteUrl = output;
-      } else if (output && typeof output === "object" && output.url) {
-        generatedRemoteUrl = String(output.url());
-      } else {
-        throw new Error("Unexpected response structure from Replicate model output.");
-      }
-    } catch (replicateErr: any) {
-      console.error("Replicate API execution failure:", replicateErr.message);
-
-      // If token is missing, provide a demo preview with notice
-      if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_your_")) {
-        const matchingStyle = DESIGN_STYLES.find(
-          (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
-        );
-        generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
-      } else {
-        // Real token is configured but Replicate rejected the call (e.g. 402 Insufficient Credit or 401 Unauthorized)
-        let customMessage = replicateErr.message;
-        if (replicateErr.message?.includes("402") || replicateErr.message?.includes("Insufficient credit") || replicateErr.message?.includes("purchase credit")) {
-          customMessage = "Replicate Account Insufficient Credit ($0 balance): To run real AI image-to-image transformations on your uploaded photos, please add a small credit ($5) at https://replicate.com/account/billing";
-        } else if (replicateErr.message?.includes("401") || replicateErr.message?.includes("Unauthenticated")) {
-          customMessage = "Invalid Replicate API Token: Please check your token at https://replicate.com/account/api-tokens";
-        }
-        throw new Error(customMessage);
-      }
+      generatedRemoteUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
+      aiEngineUsed = "Free FLUX Neural Engine ($0 Cost)";
     }
 
-    // 6. Download the generated image from temporary Replicate URL and save permanently into Supabase Storage
+    // 7. Download the generated image and save permanently into Supabase Storage
     let permanentStorageUrl = generatedRemoteUrl;
 
     try {
@@ -158,12 +158,12 @@ export async function POST(req: NextRequest) {
       if (imageResponse.ok) {
         const imageBlob = await imageResponse.arrayBuffer();
         const buffer = Buffer.from(imageBlob);
-        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.jpg`;
 
         const { error: uploadError } = await adminSupabase.storage
           .from("home_designs")
           .upload(fileName, buffer, {
-            contentType: "image/png",
+            contentType: "image/jpeg",
             upsert: true,
           });
 
@@ -176,7 +176,7 @@ export async function POST(req: NextRequest) {
             permanentStorageUrl = publicUrlData.publicUrl;
           }
         } else {
-          console.warn("Storage upload warning, retaining direct URL:", uploadError.message);
+          console.warn("Storage upload notice, retaining direct URL:", uploadError.message);
         }
       }
     } catch (storageErr) {
