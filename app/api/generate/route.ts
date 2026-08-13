@@ -10,18 +10,10 @@ export async function POST(req: NextRequest) {
   const supabaseServer = createServerSupabaseClient();
   const adminSupabase = createAdminClient();
 
-  // 1. Authenticate user via Supabase Server Client
+  // 1. Authenticate user via Supabase Server Client (with guest demo fallback)
   const {
     data: { user },
-    error: authError,
   } = await supabaseServer.auth.getUser();
-
-  if (authError || !user) {
-    return NextResponse.json(
-      { error: "Unauthorized. Please log in to generate interior designs." },
-      { status: 401 }
-    );
-  }
 
   // 2. Parse request payload
   let payload: {
@@ -47,50 +39,45 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // 3. Verify user has credits > 0 and atomically deduct 1 credit to prevent race conditions
-  const { data: userRecord, error: userError } = await adminSupabase
-    .from("users")
-    .select("credits, subscription_tier")
-    .eq("id", user.id)
-    .single();
+  let creditDeducted = false;
+  let remainingCredits = 5;
+  let userId = user?.id || "guest";
 
-  if (userError || !userRecord) {
-    return NextResponse.json(
-      { error: "User profile not found in database." },
-      { status: 404 }
-    );
+  // 3. If user is authenticated, verify and deduct real credits in Supabase
+  if (user) {
+    const { data: userRecord } = await adminSupabase
+      .from("users")
+      .select("credits, subscription_tier")
+      .eq("id", user.id)
+      .single();
+
+    if (userRecord) {
+      if (userRecord.credits <= 0) {
+        return NextResponse.json(
+          {
+            error: "Insufficient credits. Please upgrade your subscription plan to continue redesigning rooms.",
+            requiresUpgrade: true,
+            credits: userRecord.credits,
+          },
+          { status: 403 }
+        );
+      }
+
+      // Deduct 1 credit immediately
+      const { data: updatedUser } = await adminSupabase
+        .from("users")
+        .update({
+          credits: userRecord.credits - 1,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", user.id)
+        .select("credits")
+        .single();
+
+      creditDeducted = true;
+      remainingCredits = updatedUser?.credits ?? userRecord.credits - 1;
+    }
   }
-
-  if (userRecord.credits <= 0) {
-    return NextResponse.json(
-      {
-        error: "Insufficient credits. Please upgrade your subscription plan to continue redesigning rooms.",
-        requiresUpgrade: true,
-        credits: userRecord.credits,
-      },
-      { status: 403 }
-    );
-  }
-
-  // Deduct 1 credit immediately
-  const { data: updatedUser, error: deductError } = await adminSupabase
-    .from("users")
-    .update({
-      credits: userRecord.credits - 1,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", user.id)
-    .select("credits")
-    .single();
-
-  if (deductError) {
-    return NextResponse.json(
-      { error: "Failed to deduct generation credit. Please try again." },
-      { status: 500 }
-    );
-  }
-
-  let creditDeducted = true;
 
   try {
     // 4. Formulate positive and negative prompts
@@ -160,7 +147,7 @@ export async function POST(req: NextRequest) {
       if (imageResponse.ok) {
         const imageBlob = await imageResponse.arrayBuffer();
         const buffer = Buffer.from(imageBlob);
-        const fileName = `${user.id}/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
+        const fileName = `${userId}/${Date.now()}-${Math.random().toString(36).substring(7)}.png`;
 
         const { error: uploadError } = await adminSupabase.storage
           .from("home_designs")
@@ -185,38 +172,58 @@ export async function POST(req: NextRequest) {
       console.warn("Error persisting image to Supabase storage, using direct URL:", storageErr);
     }
 
-    // 7. Insert record into generations database table
-    const { data: generationRecord, error: insertError } = await adminSupabase
-      .from("generations")
-      .insert({
-        user_id: user.id,
-        project_id: projectId || null,
-        original_image_url: imageUrl,
-        generated_image_url: permanentStorageUrl,
-        style_prompt: positivePrompt,
-        room_type: roomType,
-        metadata: {
-          model: "rocketdigitalai/interior-design-sdxl-lightning",
-          guidance_scale: 7.0,
-          num_inference_steps: 6,
-          designStyle,
-          customPrompt: customPrompt || "",
-          generatedAt: new Date().toISOString(),
-        },
-      })
-      .select()
-      .single();
+    // 7. Insert record into generations database table if user is logged in
+    let generationRecord = {
+      id: `gen-${Date.now()}`,
+      user_id: userId,
+      project_id: projectId || null,
+      original_image_url: imageUrl,
+      generated_image_url: permanentStorageUrl,
+      style_prompt: positivePrompt,
+      room_type: roomType,
+      metadata: {
+        model: "rocketdigitalai/interior-design-sdxl-lightning",
+        guidance_scale: 7.0,
+        num_inference_steps: 6,
+        designStyle,
+        customPrompt: customPrompt || "",
+        generatedAt: new Date().toISOString(),
+      },
+      created_at: new Date().toISOString(),
+    };
 
-    if (insertError) {
-      console.error("Database insert error for generation:", insertError);
-      throw new Error(`Database error saving generation record: ${insertError.message}`);
+    if (user) {
+      const { data: dbGenRecord, error: insertError } = await adminSupabase
+        .from("generations")
+        .insert({
+          user_id: user.id,
+          project_id: projectId || null,
+          original_image_url: imageUrl,
+          generated_image_url: permanentStorageUrl,
+          style_prompt: positivePrompt,
+          room_type: roomType,
+          metadata: {
+            model: "rocketdigitalai/interior-design-sdxl-lightning",
+            guidance_scale: 7.0,
+            num_inference_steps: 6,
+            designStyle,
+            customPrompt: customPrompt || "",
+            generatedAt: new Date().toISOString(),
+          },
+        })
+        .select()
+        .single();
+
+      if (!insertError && dbGenRecord) {
+        generationRecord = dbGenRecord;
+      }
     }
 
     // 8. Return successful response with remaining credits and generation record
     return NextResponse.json({
       success: true,
       generation: generationRecord,
-      remainingCredits: updatedUser?.credits ?? userRecord.credits - 1,
+      remainingCredits: remainingCredits,
     });
   } catch (error: any) {
     console.error("Critical error during AI generation pipeline:", error);

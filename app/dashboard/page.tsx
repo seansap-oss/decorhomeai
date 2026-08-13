@@ -149,10 +149,15 @@ export default function DashboardPage() {
         });
 
       if (error) {
-        console.warn("Storage direct upload error, creating object URL:", error.message);
-        // Fallback for offline/development: create object URL
-        const localUrl = URL.createObjectURL(file);
-        setUploadedImageUrl(localUrl);
+        console.warn("Storage direct upload error, creating base64 data URL fallback:", error.message);
+        // Fallback: convert file to Base64 Data URL for Replicate AI ingestion
+        const reader = new FileReader();
+        reader.onloadend = () => {
+          if (typeof reader.result === "string") {
+            setUploadedImageUrl(reader.result);
+          }
+        };
+        reader.readAsDataURL(file);
       } else {
         const { data: publicUrlData } = supabase.storage
           .from("home_designs")
@@ -161,14 +166,24 @@ export default function DashboardPage() {
         if (publicUrlData?.publicUrl) {
           setUploadedImageUrl(publicUrlData.publicUrl);
         } else {
-          const localUrl = URL.createObjectURL(file);
-          setUploadedImageUrl(localUrl);
+          const reader = new FileReader();
+          reader.onloadend = () => {
+            if (typeof reader.result === "string") {
+              setUploadedImageUrl(reader.result);
+            }
+          };
+          reader.readAsDataURL(file);
         }
       }
     } catch (err: any) {
       console.error("Upload error:", err);
-      const localUrl = URL.createObjectURL(file);
-      setUploadedImageUrl(localUrl);
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        if (typeof reader.result === "string") {
+          setUploadedImageUrl(reader.result);
+        }
+      };
+      reader.readAsDataURL(file);
     } finally {
       setIsUploading(false);
     }
