@@ -135,6 +135,7 @@ export default function DashboardPage() {
 
     setIsUploading(true);
     setErrorMessage(null);
+    setActiveGeneration(null);
 
     try {
       const fileExt = file.name.split(".").pop();
@@ -282,6 +283,7 @@ export default function DashboardPage() {
 
   // Sample room filler for instant testing
   const handleLoadSample = (sampleUrl: string) => {
+    setActiveGeneration(null);
     setUploadedImageUrl(sampleUrl);
   };
 

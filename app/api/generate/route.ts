@@ -105,18 +105,17 @@ export async function POST(req: NextRequest) {
     let generatedRemoteUrl: string = "";
 
     try {
-      // Run the interior-design-sdxl-lightning model
+      // Run the official adirik/interior-design ControlNet image-to-image pipeline
       const output: any = await replicate.run(
-        "rocketdigitalai/interior-design-sdxl-lightning:7b11d9c12b7a951c24e60248c897f1f0a202d08a54625b5b22b109e992982dc8",
+        "adirik/interior-design:76604baddc85b1b4616e1c6475eca080da339c8875bd4996705440484a6eac38",
         {
           input: {
             image: imageUrl,
             prompt: positivePrompt,
             negative_prompt: negativePrompt,
-            guidance_scale: 7.0,
-            num_inference_steps: 6,
-            control_depth: 0.85,
-            prompt_strength: 0.8,
+            prompt_strength: 0.75, // Keeps 75% creative redesign while locking original room walls & furniture geometry
+            guidance_scale: 15,
+            num_inference_steps: 30,
           },
         }
       );
