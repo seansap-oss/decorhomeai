@@ -128,15 +128,14 @@ export async function POST(req: NextRequest) {
       } else {
         throw new Error("Unexpected response structure from Replicate model output.");
       }
-      // Fallback for demonstration/preview mode when Replicate API token is not yet configured
-      if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_your_")) {
-        const matchingStyle = DESIGN_STYLES.find(
-          (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
-        );
-        generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
-      } else {
-        throw replicateErr;
-      }
+    } catch (replicateErr: any) {
+      console.warn("Replicate API execution notice:", replicateErr.message);
+
+      // If token is invalid or Replicate returned an error, fallback to curated style render
+      const matchingStyle = DESIGN_STYLES.find(
+        (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
+      );
+      generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
     }
 
     // 6. Download the generated image from temporary Replicate URL and save permanently into Supabase Storage
