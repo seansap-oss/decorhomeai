@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { DESIGN_STYLES } from "@/lib/constants/designStyles";
 import Replicate from "replicate";
 
 export const maxDuration = 60; // Allow sufficient timeout for AI rendering
@@ -140,13 +141,12 @@ export async function POST(req: NextRequest) {
       } else {
         throw new Error("Unexpected response structure from Replicate model output.");
       }
-    } catch (replicateErr: any) {
-      console.error("Replicate AI call encountered error / mock fallback:", replicateErr.message);
-
-      // Fallback for demonstration/offline/mock mode if Replicate token is invalid
-      if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_")) {
-        // High quality curated interior design mockup matching style
-        generatedRemoteUrl = "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
+      // Fallback for demonstration/preview mode when Replicate API token is not yet configured
+      if (!replicateToken || replicateToken.includes("placeholder") || replicateToken.startsWith("r8_your_")) {
+        const matchingStyle = DESIGN_STYLES.find(
+          (s) => s.name.toLowerCase() === designStyle.toLowerCase() || s.id.toLowerCase() === designStyle.toLowerCase()
+        );
+        generatedRemoteUrl = matchingStyle?.imageUrl || "https://images.unsplash.com/photo-1600210492486-724fe5c67fb0?auto=format&fit=crop&w=1200&q=80";
       } else {
         throw replicateErr;
       }
